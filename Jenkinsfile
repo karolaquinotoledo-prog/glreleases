@@ -40,9 +40,9 @@ pipeline {
             steps {
                 echo "Desplegando en Staging..."
                 sh '''
-                    # Eliminamos el flag -f y dejamos que docker use el archivo por defecto
-                    # Movimos el -d al final, que es como lo esperan versiones antiguas
-                    docker compose up --force-recreate -d app-staging
+                    # El comando 'up' debe ir inmediatamente después de 'compose'
+                    # Luego las opciones y al final el nombre del servicio
+                    docker compose up -d --force-recreate app-staging
                     
                     sleep 10
                     docker compose ps
