@@ -40,12 +40,22 @@ pipeline {
             steps {
                 echo "Desplegando en Staging..."
                 sh '''
-                    # El comando 'up' debe ir inmediatamente después de 'compose'
-                    # Luego las opciones y al final el nombre del servicio
-                    docker compose up -d --force-recreate app-staging
+                    # Verificar versiones disponibles
+                    docker --version
+                    which docker
                     
-                    sleep 10
-                    docker compose ps
+                    # Usar path completo del plugin compose
+                    /usr/local/lib/docker/cli-plugins/docker-compose up \
+                        --detach \
+                        --force-recreate \
+                        app-staging || \
+                    docker compose up \
+                        --detach \
+                        --force-recreate \
+                        app-staging
+                    
+                    sleep 5
+                    docker ps | grep staging
                 '''
             }
         }
