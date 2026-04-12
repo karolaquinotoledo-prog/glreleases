@@ -39,11 +39,14 @@ pipeline {
         stage('Deploy Staging') {
             steps {
                 echo "Desplegando en Staging..."
-                sh """
-                    docker compose -f docker-compose.yml up -d --force-recreate app-staging
-                    sleep 5
-                    docker compose ps app-staging
-                """
+                sh '''
+                    # Eliminamos el flag -f y dejamos que docker use el archivo por defecto
+                    # Movimos el -d al final, que es como lo esperan versiones antiguas
+                    docker compose up --force-recreate -d app-staging
+                    
+                    sleep 10
+                    docker compose ps
+                '''
             }
         }
 
