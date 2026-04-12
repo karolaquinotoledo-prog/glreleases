@@ -40,10 +40,8 @@ pipeline {
         stage('Test') {
             steps {
                 echo "Ejecutando tests..."
-                sh '''
-                    docker run --rm restaurante-app:${IMAGE_TAG} \
-                        sh -c "npm test 2>&1"
-                '''
+                sh 
+                    "docker run --rm restaurante-app:build-${env.BUILD_NUMBER} npm test"
             }
         }
 
