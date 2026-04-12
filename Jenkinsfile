@@ -1,10 +1,10 @@
 pipeline {
-
     agent any
 
     environment {
-        APP_NAME        = "restaurante-app"
-        IMAGE_TAG       = "build-${BUILD_NUMBER}"
+        APP_NAME = "restaurante-app"
+        // Aseguramos que el tag coincida en todas las etapas
+        IMAGE_TAG = "build-${env.BUILD_NUMBER}"
     }
 
     options {
@@ -14,7 +14,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 echo "Clonando rama: ${GIT_BRANCH}"
@@ -23,25 +22,17 @@ pipeline {
             }
         }
 
-        stage('Build') {
+        stage('Build & Test') {
             steps {
-                echo "Construyendo imagen Docker..."
-                sh '''
+                echo "Construyendo y testeando imagen Docker..."
+                // Si RUN npm run test:ci falla en el Dockerfile, esta etapa fallará
+                sh """
                     docker build \
-                        -t restaurante-app:${IMAGE_TAG} \
-                        -t restaurante-app:latest \
+                        -t ${APP_NAME}:${IMAGE_TAG} \
+                        -t ${APP_NAME}:latest \
                         -f app/Dockerfile \
                         ./app
-                '''
-                echo "Imagen construida: restaurante-app:${IMAGE_TAG}"
-            }
-        }
-
-        stage('Test') {
-            steps {
-                echo "Ejecutando tests..."
-                sh 
-                    "docker run --rm restaurante-app:build-${env.BUILD_NUMBER} npm test"
+                """
             }
         }
 
@@ -74,13 +65,13 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline completado exitosamente - Build ${BUILD_NUMBER}"
+            echo "✅ Pipeline completado exitosamente - Build ${BUILD_NUMBER}"
         }
         failure {
-            echo "Pipeline fallido - revisar logs del Build ${BUILD_NUMBER}"
+            echo "❌ Pipeline fallido - revisar logs del Build ${BUILD_NUMBER}"
         }
         always {
-            echo "Limpiando imagenes temporales..."
+            echo "🧹 Limpiando imágenes temporales..."
             sh 'docker image prune -f || true'
         }
     }
