@@ -104,8 +104,8 @@ scrape_configs:
   # ── Jenkins ───────────────────────────────────────────────────────
   - job_name: 'jenkins'
     static_configs:
-      - targets: ['jenkins:8080']
-    metrics_path: /prometheus
+      - targets: ['jenkins:8087']
+    metrics_path: '/prometheus/'
     scrape_interval: 30s
 
   # ── Kubernetes API Server (si se usa K8s local) ───────────────────
