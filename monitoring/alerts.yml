@@ -1,0 +1,169 @@
+##############################################################
+# monitoring/alerts.yml
+# Reglas de alerta para Prometheus
+# Integra con Alertmanager → Slack / Email
+##############################################################
+
+groups:
+
+  # ══════════════════════════════════════════════════════════════════
+  # GRUPO 1: Disponibilidad de la Aplicación
+  # ══════════════════════════════════════════════════════════════════
+  - name: restaurante.availability
+    interval: 30s
+    rules:
+
+      # Alerta si el endpoint de métricas no responde
+      - alert: AppDown
+        expr: up{job=~"restaurante-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "🚨 RestauranteApp caída en {{ $labels.env }}"
+          description: |
+            La instancia {{ $labels.instance }} ({{ $labels.slot }})
+            no responde desde hace más de 1 minuto.
+            Valor: {{ $value }}
+
+      # Alerta si la tasa de errores HTTP supera el 5%
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{status_code=~"5..", job=~"restaurante-.*"}[5m])
+          /
+          rate(http_requests_total{job=~"restaurante-.*"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "⚠️ Alta tasa de errores en {{ $labels.env }}"
+          description: |
+            Tasa de errores 5xx: {{ $value | humanizePercentage }}
+            Instancia: {{ $labels.instance }}
+            Umbral: 5%
+
+      # Alerta si la tasa de errores supera el 15%
+      - alert: CriticalErrorRate
+        expr: |
+          rate(http_requests_total{status_code=~"5..", job=~"restaurante-.*"}[5m])
+          /
+          rate(http_requests_total{job=~"restaurante-.*"}[5m]) > 0.15
+        for: 1m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "🚨 Tasa de errores crítica en {{ $labels.env }}"
+          description: "Tasa de errores: {{ $value | humanizePercentage }}"
+
+  # ══════════════════════════════════════════════════════════════════
+  # GRUPO 2: Latencia y Performance
+  # ══════════════════════════════════════════════════════════════════
+  - name: restaurante.performance
+    rules:
+
+      # Alerta si el P95 de latencia supera 1 segundo
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job=~"restaurante-.*"}[5m])
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "⚠️ Latencia alta P95 en {{ $labels.env }}"
+          description: |
+            Percentil 95 de latencia: {{ $value | humanizeDuration }}
+            Umbral: 1 segundo
+            Ruta: {{ $labels.route }}
+
+      # Alerta si el P99 supera 3 segundos
+      - alert: CriticalLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            rate(http_request_duration_seconds_bucket{job=~"restaurante-.*"}[5m])
+          ) > 3.0
+        for: 3m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "🚨 Latencia crítica P99 en {{ $labels.env }}"
+          description: "P99: {{ $value | humanizeDuration }}"
+
+  # ══════════════════════════════════════════════════════════════════
+  # GRUPO 3: Recursos del Sistema
+  # ══════════════════════════════════════════════════════════════════
+  - name: system.resources
+    rules:
+
+      # CPU alta en el host
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by (instance) (
+            rate(node_cpu_seconds_total{mode="idle"}[5m])
+          ) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ CPU alta en {{ $labels.instance }}"
+          description: "Uso de CPU: {{ $value | humanize }}%"
+
+      # Memoria disponible baja
+      - alert: LowMemory
+        expr: |
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Memoria baja en {{ $labels.instance }}"
+          description: "Memoria disponible: {{ $value | humanize }}%"
+
+      # Disco casi lleno
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!="tmpfs"} /
+           node_filesystem_size_bytes{fstype!="tmpfs"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🚨 Disco casi lleno en {{ $labels.instance }}"
+          description: |
+            Punto de montaje: {{ $labels.mountpoint }}
+            Espacio libre: {{ $value | humanize }}%
+
+  # ══════════════════════════════════════════════════════════════════
+  # GRUPO 4: Contenedores Docker
+  # ══════════════════════════════════════════════════════════════════
+  - name: containers.health
+    rules:
+
+      # Contenedor reiniciándose frecuentemente
+      - alert: ContainerRestartingTooOften
+        expr: |
+          rate(container_last_seen{container_label_app="restaurante"}[15m]) < 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Contenedor reiniciándose: {{ $labels.name }}"
+          description: "El contenedor {{ $labels.name }} se reinicia frecuentemente"
+
+      # Uso excesivo de memoria en contenedor
+      - alert: ContainerHighMemory
+        expr: |
+          (container_memory_usage_bytes{container_label_app="restaurante"}
+           / container_spec_memory_limit_bytes{container_label_app="restaurante"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Memoria alta en contenedor {{ $labels.name }}"
+          description: "Uso de memoria: {{ $value | humanizePercentage }}"

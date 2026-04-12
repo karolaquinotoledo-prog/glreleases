@@ -1,0 +1,118 @@
+##############################################################
+# monitoring/prometheus.yml
+# Configuración principal de Prometheus
+# Recopila métricas de: App, Node Exporter, cAdvisor
+##############################################################
+
+global:
+  scrape_interval:     15s    # Frecuencia de scraping
+  evaluation_interval: 15s    # Frecuencia de evaluación de reglas
+  scrape_timeout:      10s
+
+  # Etiquetas globales añadidas a todas las métricas
+  external_labels:
+    cluster: 'devops-local'
+    environment: 'on-premise'
+    project: 'restaurante-app'
+
+# ── Reglas de alertas ────────────────────────────────────────────────
+rule_files:
+  - "alerts.yml"
+
+# ── Configuración de Alertmanager ───────────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# ══════════════════════════════════════════════════════════════════════
+# SCRAPE CONFIGS
+# ══════════════════════════════════════════════════════════════════════
+scrape_configs:
+
+  # ── Prometheus self-monitoring ────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # ── RestauranteApp - Staging ──────────────────────────────────────
+  - job_name: 'restaurante-staging'
+    static_configs:
+      - targets: ['app-staging:3000']
+        labels:
+          env: staging
+          app: restaurante
+          slot: staging
+    metrics_path: /metrics
+    scrape_interval: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: environment
+        replacement: staging
+
+  # ── RestauranteApp - Producción Blue ─────────────────────────────
+  - job_name: 'restaurante-prod-blue'
+    static_configs:
+      - targets: ['app-prod-blue:3000']
+        labels:
+          env: production
+          app: restaurante
+          slot: blue
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # ── RestauranteApp - Producción Green ────────────────────────────
+  - job_name: 'restaurante-prod-green'
+    static_configs:
+      - targets: ['app-prod-green:3000']
+        labels:
+          env: production
+          app: restaurante
+          slot: green
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # ── Node Exporter (métricas del sistema operativo) ────────────────
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          app: node-exporter
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+)(:[0-9]+)?'
+        target_label: instance
+        replacement: '${1}'
+
+  # ── cAdvisor (métricas de contenedores Docker) ───────────────────
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          app: cadvisor
+    scrape_interval: 15s
+    metric_relabel_configs:
+      # Filtrar solo contenedores de la app (reducir cardinalidad)
+      - source_labels: [container_label_app]
+        regex: restaurante
+        action: keep
+
+  # ── Jenkins ───────────────────────────────────────────────────────
+  - job_name: 'jenkins'
+    static_configs:
+      - targets: ['jenkins:8080']
+    metrics_path: /prometheus
+    scrape_interval: 30s
+
+  # ── Kubernetes API Server (si se usa K8s local) ───────────────────
+  # - job_name: 'kubernetes-apiservers'
+  #   kubernetes_sd_configs:
+  #     - role: endpoints
+  #   scheme: https
+  #   tls_config:
+  #     ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  #   bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token

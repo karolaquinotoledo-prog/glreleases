@@ -1,0 +1,361 @@
+##############################################################
+# k8s/deployment.yml
+# Estrategia Blue-Green con Argo CD
+# Despliegue: RestauranteApp
+##############################################################
+
+---
+# ── Namespace ────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: restaurante
+  labels:
+    app: restaurante
+    managed-by: argocd
+
+---
+# ── ConfigMap: Variables de configuración ───────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restaurante-config
+  namespace: restaurante
+  labels:
+    app: restaurante
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+
+---
+# ── Secret: Variables sensibles ─────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restaurante-secrets
+  namespace: restaurante
+  labels:
+    app: restaurante
+type: Opaque
+stringData:
+  JWT_SECRET: "prod_secret_CHANGE_ME_USE_SEALED_SECRETS"
+
+---
+# ═══════════════════════════════════════════════════════════════════
+# BLUE DEPLOYMENT (versión activa en producción)
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restaurante-blue
+  namespace: restaurante
+  labels:
+    app: restaurante
+    slot: blue
+    version: "1.0.0"
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: restaurante
+      slot: blue
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: restaurante
+        slot: blue
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Asegurar distribución entre nodos
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: slot
+                      operator: In
+                      values: ["blue"]
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: restaurante
+          # Jenkins actualiza este tag automáticamente vía GitOps
+          image: localhost:5000/restaurante-app:1.0.0-abc123-42
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: restaurante-config
+                  key: NODE_ENV
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: restaurante-config
+                  key: PORT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: restaurante-secrets
+                  key: JWT_SECRET
+            - name: APP_VERSION
+              value: "blue-1.0.0"
+
+          # ── Probes de salud ────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+
+          # ── Límites de recursos ────────────────────────────────────
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+          # ── Volume mounts ──────────────────────────────────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+
+---
+# ═══════════════════════════════════════════════════════════════════
+# GREEN DEPLOYMENT (versión standby / nueva versión pre-producción)
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restaurante-green
+  namespace: restaurante
+  labels:
+    app: restaurante
+    slot: green
+    version: "1.1.0"
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: restaurante
+      slot: green
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: restaurante
+        slot: green
+        version: "1.1.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: restaurante
+          image: localhost:5000/restaurante-app:1.1.0-def456-45
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: restaurante-config
+                  key: NODE_ENV
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: restaurante-secrets
+                  key: JWT_SECRET
+            - name: APP_VERSION
+              value: "green-1.1.0"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+
+---
+# ═══════════════════════════════════════════════════════════════════
+# SERVICES
+# ═══════════════════════════════════════════════════════════════════
+
+# Service para Blue (producción activa)
+apiVersion: v1
+kind: Service
+metadata:
+  name: restaurante-blue-svc
+  namespace: restaurante
+  labels:
+    app: restaurante
+    slot: blue
+spec:
+  selector:
+    app: restaurante
+    slot: blue
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+
+---
+# Service para Green (standby / nueva versión)
+apiVersion: v1
+kind: Service
+metadata:
+  name: restaurante-green-svc
+  namespace: restaurante
+  labels:
+    app: restaurante
+    slot: green
+spec:
+  selector:
+    app: restaurante
+    slot: green
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+
+---
+# Service activo de producción (apunta a Blue o Green según el deploy)
+# Para hacer el switch Blue→Green, cambiar selector slot: blue por slot: green
+apiVersion: v1
+kind: Service
+metadata:
+  name: restaurante-prod
+  namespace: restaurante
+  labels:
+    app: restaurante
+  annotations:
+    # Argo CD Rollouts lo gestiona automáticamente
+    argocd-rollouts.argoproj.io/managed-by: "true"
+spec:
+  selector:
+    app: restaurante
+    slot: blue    # ← cambiar a 'green' para hacer el switch
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+
+---
+# ── Ingress ──────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: restaurante-ingress
+  namespace: restaurante
+  labels:
+    app: restaurante
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: restaurante.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: restaurante-prod
+                port:
+                  number: 80
+
+---
+# ── HorizontalPodAutoscaler ──────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: restaurante-hpa
+  namespace: restaurante
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: restaurante-blue
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

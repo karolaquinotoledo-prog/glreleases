@@ -1,0 +1,149 @@
+##############################################################
+# k8s/argocd-app.yml
+# Configuración de Argo CD para GitOps
+# Monitorea el repositorio Git y sincroniza automáticamente
+# con el cluster de Kubernetes
+##############################################################
+
+---
+# ── Argo CD Application ──────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: restaurante-app
+  namespace: argocd
+  labels:
+    app: restaurante
+    team: backend
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # ── Proyecto Argo CD ───────────────────────────────────────────────
+  project: default
+
+  # ── Fuente: Repositorio Git con los manifiestos ────────────────────
+  source:
+    repoURL: https://github.com/tu-org/restaurante-app.git
+    targetRevision: main       # rama o tag a seguir
+    path: k8s                  # carpeta dentro del repo con los YAMLs
+
+  # ── Destino: Cluster y namespace ──────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc   # cluster local
+    namespace: restaurante
+
+  # ── Política de sincronización ─────────────────────────────────────
+  syncPolicy:
+    automated:
+      prune: true       # eliminar recursos que ya no existen en Git
+      selfHeal: true    # revertir cambios manuales en el cluster
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # ── Ignorar diferencias en campos dinámicos ────────────────────────
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas   # HPA gestiona replicas, ignorar drift
+
+  # ── Información del proyecto ───────────────────────────────────────
+  info:
+    - name: "Repositorio"
+      value: "https://github.com/tu-org/restaurante-app"
+    - name: "Equipo"
+      value: "DevOps Team"
+    - name: "Slack"
+      value: "#devops-alerts"
+
+---
+##############################################################
+# Argo CD Project (permisos y restricciones)
+##############################################################
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: restaurante-project
+  namespace: argocd
+spec:
+  description: "Proyecto de gestión del RestauranteApp"
+
+  # Solo puede sincronizar desde este repositorio
+  sourceRepos:
+    - https://github.com/tu-org/restaurante-app.git
+
+  # Solo puede desplegar en estos destinos
+  destinations:
+    - namespace: restaurante
+      server: https://kubernetes.default.svc
+    - namespace: restaurante-staging
+      server: https://kubernetes.default.svc
+
+  # Recursos permitidos
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "apps"
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+
+  # Roles del proyecto
+  roles:
+    - name: developer
+      description: "Developers - solo lectura"
+      policies:
+        - p, proj:restaurante-project:developer, applications, get, restaurante-project/*, allow
+      groups:
+        - developers
+
+    - name: devops
+      description: "DevOps - acceso completo"
+      policies:
+        - p, proj:restaurante-project:devops, applications, *, restaurante-project/*, allow
+      groups:
+        - devops-team
+
+---
+##############################################################
+# Script de switch Blue-Green (ejecutar manualmente o via Jenkins)
+# Guardar como: k8s/scripts/blue-green-switch.sh
+##############################################################
+# #!/bin/bash
+# # Switch de Blue a Green (o viceversa)
+#
+# CURRENT=$(kubectl get svc restaurante-prod -n restaurante \
+#   -o jsonpath='{.spec.selector.slot}')
+#
+# if [ "$CURRENT" = "blue" ]; then
+#   NEW_SLOT="green"
+# else
+#   NEW_SLOT="blue"
+# fi
+#
+# echo "🔄 Cambiando tráfico de $CURRENT → $NEW_SLOT"
+#
+# kubectl patch svc restaurante-prod -n restaurante \
+#   --type='json' \
+#   -p="[{\"op\": \"replace\", \"path\": \"/spec/selector/slot\", \"value\": \"$NEW_SLOT\"}]"
+#
+# echo "✅ Tráfico ahora apunta a: $NEW_SLOT"
+# kubectl get svc restaurante-prod -n restaurante -o jsonpath='{.spec.selector}'

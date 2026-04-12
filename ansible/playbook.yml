@@ -1,0 +1,239 @@
+---
+##############################################################
+# playbook.yml - Ansible
+# Configura nodos de Staging y Producción con:
+#   - Docker + Docker Compose
+#   - Node.js 20 LTS
+#   - Herramientas de monitoreo
+#   - Hardening básico de seguridad
+##############################################################
+
+- name: "🍽️  RestauranteApp :: Configuración de Infraestructura Base"
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    node_version: "20"
+    docker_compose_version: "v2.20.3"
+    app_user: "appuser"
+    app_dir: "/opt/restaurante"
+    log_dir: "/var/log/restaurante"
+
+  pre_tasks:
+    - name: Mostrar información del nodo
+      ansible.builtin.debug:
+        msg: |
+          ┌─────────────────────────────────────────────┐
+          │  Host     : {{ inventory_hostname }}
+          │  OS       : {{ ansible_distribution }} {{ ansible_distribution_version }}
+          │  Entorno  : {{ env | default('desconocido') }}
+          └─────────────────────────────────────────────┘
+
+    - name: Actualizar caché de paquetes APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+  tasks:
+
+    # ── 1. Dependencias del sistema ─────────────────────────────────
+    - name: Instalar paquetes base del sistema
+      ansible.builtin.apt:
+        name:
+          - curl
+          - wget
+          - git
+          - unzip
+          - htop
+          - vim
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - apt-transport-https
+          - python3-pip
+          - python3-setuptools
+        state: present
+
+    # ── 2. Docker ───────────────────────────────────────────────────
+    - name: Agregar clave GPG oficial de Docker
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Agregar repositorio Docker
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Instalar Docker Engine
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Habilitar e iniciar servicio Docker
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    # ── 3. Node.js 20 LTS ───────────────────────────────────────────
+    - name: Descargar script de instalación de NodeSource
+      ansible.builtin.get_url:
+        url: "https://deb.nodesource.com/setup_{{ node_version }}.x"
+        dest: /tmp/nodesource_setup.sh
+        mode: "0755"
+
+    - name: Ejecutar script de NodeSource
+      ansible.builtin.command: /tmp/nodesource_setup.sh
+      changed_when: true
+
+    - name: Instalar Node.js
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+        update_cache: true
+
+    - name: Verificar versión de Node.js
+      ansible.builtin.command: node --version
+      register: node_ver
+      changed_when: false
+
+    - name: Mostrar versión instalada
+      ansible.builtin.debug:
+        msg: "✅ Node.js instalado: {{ node_ver.stdout }}"
+
+    # ── 4. Usuario y directorios de la aplicación ──────────────────
+    - name: Crear usuario de aplicación (sin shell)
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        system: true
+        shell: /sbin/nologin
+        groups: docker
+        append: true
+
+    - name: Crear directorio de la aplicación
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Crear directorio de logs
+      ansible.builtin.file:
+        path: "{{ log_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    # ── 5. Configurar systemd service ──────────────────────────────
+    - name: Crear unit file de systemd para RestauranteApp
+      ansible.builtin.template:
+        src: templates/restaurante.service.j2
+        dest: /etc/systemd/system/restaurante.service
+        mode: "0644"
+      notify: Recargar systemd
+
+    # ── 6. Hardening básico ─────────────────────────────────────────
+    - name: Configurar límites del sistema (ulimits)
+      ansible.builtin.pam_limits:
+        domain: "{{ app_user }}"
+        limit_type: "{{ item.type }}"
+        limit_item: "{{ item.item }}"
+        value: "{{ item.value }}"
+      loop:
+        - { type: soft, item: nofile, value: "65536" }
+        - { type: hard, item: nofile, value: "65536" }
+        - { type: soft, item: nproc,  value: "4096" }
+        - { type: hard, item: nproc,  value: "4096" }
+
+    - name: Deshabilitar acceso root por SSH
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^PermitRootLogin"
+        line: "PermitRootLogin no"
+      notify: Reiniciar SSH
+
+    - name: Configurar firewall UFW - permitir puertos necesarios
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"    # SSH
+        - "80"    # HTTP / Nginx LB
+        - "3000"  # App Prod
+        - "3001"  # App Staging
+        - "9090"  # Prometheus
+        - "3333"  # Grafana
+
+    - name: Habilitar UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    # ── 7. Configurar logrotate ────────────────────────────────────
+    - name: Configurar rotación de logs de la aplicación
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/restaurante
+        content: |
+          {{ log_dir }}/*.log {
+              daily
+              rotate 14
+              compress
+              delaycompress
+              missingok
+              notifempty
+              sharedscripts
+              postrotate
+                  systemctl reload restaurante 2>/dev/null || true
+              endscript
+          }
+        mode: "0644"
+
+  handlers:
+    - name: Recargar systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Reiniciar SSH
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+
+  post_tasks:
+    - name: "✅ Resumen de instalación"
+      ansible.builtin.debug:
+        msg: |
+          ════════════════════════════════════════════
+           Configuración completada en {{ inventory_hostname }}
+           Entorno  : {{ env | default('N/A') }}
+           Node.js  : {{ node_ver.stdout }}
+           Docker   : activo
+           UFW      : habilitado
+           AppDir   : {{ app_dir }}
+          ════════════════════════════════════════════
+
+##############################################################
+# inventory.ini (referencia)
+##############################################################
+# [staging]
+# staging-node ansible_host=192.168.1.10 env=staging
+#
+# [production]
+# prod-node ansible_host=192.168.1.20 env=production
+#
+# [all:vars]
+# ansible_user=ubuntu
+# ansible_ssh_private_key_file=~/.ssh/devops_key
+##############################################################
