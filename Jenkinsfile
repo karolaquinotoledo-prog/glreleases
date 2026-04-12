@@ -1,9 +1,10 @@
 pipeline {
+
     agent any
 
     environment {
-        APP_NAME = "restaurante-app"
-        IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+        APP_NAME  = "restaurante-app"
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
     }
 
     options {
@@ -13,6 +14,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout') {
             steps {
                 echo "Clonando rama: ${GIT_BRANCH}"
@@ -24,49 +26,56 @@ pipeline {
         stage('Build & Test') {
             steps {
                 echo "Construyendo y testeando imagen Docker..."
-                // Los tests se ejecutan dentro del Dockerfile como acordamos
-                sh "docker build -t ${APP_NAME}:${IMAGE_TAG} -t ${APP_NAME}:latest -f app/Dockerfile ./app"
+                sh """
+                    docker build \
+                        -t restaurante-app:${IMAGE_TAG} \
+                        -t restaurante-app:latest \
+                        -f app/Dockerfile \
+                        ./app
+                """
             }
         }
 
         stage('Deploy Staging') {
             steps {
                 echo "Desplegando en Staging..."
-                sh '''
-                    # Usamos el formato con guion para compatibilidad
-                    docker-compose up -d --force-recreate app-staging
-                    sleep 10
-                    docker-compose ps
-                '''
+                sh """
+                    docker compose -f docker-compose.yml up -d --force-recreate app-staging
+                    sleep 5
+                    docker compose ps app-staging
+                """
             }
         }
 
         stage('Smoke Test') {
             steps {
                 echo "Verificando que staging responde..."
-                sh '''
-                    # Puerto 3001 según tu docker-compose para staging
-                    STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/health)
-                    echo "HTTP Status: $STATUS"
-                    if [ "$STATUS" != "200" ]; then
-                        echo "Smoke test fallido"
-                        exit 1
-                    fi
-                    echo "Smoke test OK"
-                '''
+                sh """
+                    for i in 1 2 3 4 5; do
+                        STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://app-staging:3000/health)
+                        echo "Intento \$i: HTTP \$STATUS"
+                        if [ "\$STATUS" = "200" ]; then
+                            echo "Smoke test OK"
+                            exit 0
+                        fi
+                        sleep 3
+                    done
+                    echo "Smoke test fallido"
+                    exit 1
+                """
             }
         }
     }
 
     post {
         success {
-            echo "✅ Pipeline completado exitosamente - Build ${BUILD_NUMBER}"
+            echo "✅ Pipeline completado - Build ${BUILD_NUMBER}"
         }
         failure {
             echo "❌ Pipeline fallido - revisar logs"
         }
         always {
-            echo "🧹 Limpiando imágenes temporales..."
+            echo "🧹 Limpiando imagenes temporales..."
             sh 'docker image prune -f || true'
         }
     }
