@@ -36,7 +36,7 @@ pipeline {
                     # Usamos el formato con guion para compatibilidad
                     docker-compose up -d --force-recreate app-staging
                     sleep 10
-                    docker-compose ps app-staging
+                    docker-compose ps
                 '''
             }
         }
