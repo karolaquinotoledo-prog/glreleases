@@ -40,9 +40,10 @@ pipeline {
             steps {
                 echo "Desplegando en Staging..."
                 sh '''
-                    docker compose up -d app-staging --force-recreate
-                    sleep 5
-                    docker compose ps app-staging
+                    # Usamos 'docker compose' (comando moderno)
+                    docker compose up -d --force-recreate app-staging
+                    sleep 10
+                    docker compose ps
                 '''
             }
         }
