@@ -20,8 +20,8 @@ pipeline {
         GIT_REPO_URL    = "https://github.com/karolaquinotoledo-prog/glreleases.git"
 
         // Credenciales configuradas en Jenkins Credentials Manager
-        DOCKER_CREDS    = credentials('docker-registry-creds')
-        SONAR_TOKEN     = credentials('sonarqube-token')
+        //DOCKER_CREDS    = credentials('docker-registry-creds')
+        //SONAR_TOKEN     = credentials('sonarqube-token')
 
         // Umbrales de calidad
         TEST_COVERAGE_THRESHOLD = "70"
