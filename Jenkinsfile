@@ -3,7 +3,6 @@ pipeline {
 
     environment {
         APP_NAME = "restaurante-app"
-        // Aseguramos que el tag coincida en todas las etapas
         IMAGE_TAG = "build-${env.BUILD_NUMBER}"
     }
 
@@ -25,14 +24,8 @@ pipeline {
         stage('Build & Test') {
             steps {
                 echo "Construyendo y testeando imagen Docker..."
-                // Si RUN npm run test:ci falla en el Dockerfile, esta etapa fallará
-                sh """
-                    docker build \
-                        -t ${APP_NAME}:${IMAGE_TAG} \
-                        -t ${APP_NAME}:latest \
-                        -f app/Dockerfile \
-                        ./app
-                """
+                // Los tests se ejecutan dentro del Dockerfile como acordamos
+                sh "docker build -t ${APP_NAME}:${IMAGE_TAG} -t ${APP_NAME}:latest -f app/Dockerfile ./app"
             }
         }
 
@@ -40,10 +33,10 @@ pipeline {
             steps {
                 echo "Desplegando en Staging..."
                 sh '''
-                    # Usamos 'docker compose' (comando moderno)
-                    docker compose up -d --force-recreate app-staging
+                    # Usamos el formato con guion para compatibilidad
+                    docker-compose up -d --force-recreate app-staging
                     sleep 10
-                    docker compose ps
+                    docker-compose ps app-staging
                 '''
             }
         }
@@ -52,6 +45,7 @@ pipeline {
             steps {
                 echo "Verificando que staging responde..."
                 sh '''
+                    # Puerto 3001 según tu docker-compose para staging
                     STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/health)
                     echo "HTTP Status: $STATUS"
                     if [ "$STATUS" != "200" ]; then
@@ -69,7 +63,7 @@ pipeline {
             echo "✅ Pipeline completado exitosamente - Build ${BUILD_NUMBER}"
         }
         failure {
-            echo "❌ Pipeline fallido - revisar logs del Build ${BUILD_NUMBER}"
+            echo "❌ Pipeline fallido - revisar logs"
         }
         always {
             echo "🧹 Limpiando imágenes temporales..."
