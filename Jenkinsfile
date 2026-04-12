@@ -10,6 +10,9 @@ pipeline {
 
     // Ejecutar en cualquier agente disponible (o especificar uno)
     agent any
+    tools {
+        nodejs 'node20' // El nombre que le pusiste arriba
+    }
 
     // ── Variables de entorno globales ────────────────────────────────
     environment {
@@ -74,6 +77,7 @@ pipeline {
                 echo "🔎 Analizando calidad de código..."
                 sh '''
                     npm install --silent
+                    echo "Lint completado"
                     npx eslint . --ext .js --format stylish --max-warnings 10 || true
                 '''
             }
