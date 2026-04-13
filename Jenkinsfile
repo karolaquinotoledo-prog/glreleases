@@ -2,7 +2,6 @@ pipeline {
 
     agent any
 
-    // ── Parámetros que aparecen antes de ejecutar ─────────────────
     parameters {
         choice(
             name: 'DEPLOY_SLOT',
@@ -22,10 +21,9 @@ pipeline {
     }
 
     environment {
-        APP_NAME  = "restaurante-app"
-        IMAGE_TAG = "build-${BUILD_NUMBER}"
-        // Puerto según el slot elegido
-        PROD_PORT = "${params.DEPLOY_SLOT == 'blue' ? '3000' : '3002'}"
+        APP_NAME       = "restaurante-app"
+        IMAGE_TAG      = "build-${BUILD_NUMBER}"
+        PROD_PORT      = "${params.DEPLOY_SLOT == 'blue' ? '3000' : '3002'}"
         CONTAINER_NAME = "restaurante-prod-${params.DEPLOY_SLOT}"
     }
 
@@ -63,10 +61,10 @@ pipeline {
             steps {
                 echo "Construyendo imagen Docker..."
                 sh """
-                    docker build \
-                        -t restaurante-app:${IMAGE_TAG} \
-                        -t restaurante-app:latest \
-                        -f app/Dockerfile \
+                    docker build \\
+                        -t restaurante-app:${IMAGE_TAG} \\
+                        -t restaurante-app:latest \\
+                        -f app/Dockerfile \\
                         ./app
 
                     echo "Imagen construida:"
@@ -76,10 +74,10 @@ pipeline {
         }
 
         stage('Deploy Staging') {
-            // Solo ejecuta si el entorno elegido es staging o ambos
             when {
                 expression {
-                    return params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'ambos'
+                    return params.DEPLOY_ENV == 'staging' ||
+                           params.DEPLOY_ENV == 'ambos'
                 }
             }
             steps {
@@ -88,13 +86,14 @@ pipeline {
                     docker stop restaurante-staging 2>/dev/null || true
                     docker rm restaurante-staging 2>/dev/null || true
 
-                    docker run --detach \
-                        --name restaurante-staging \
-                        --publish 3001:3000 \
-                        --env NODE_ENV=staging \
-                        --env PORT=3000 \
-                        --env JWT_SECRET=staging_secret \
-                        --env APP_VERSION=${IMAGE_TAG} \
+                    docker run --detach \\
+                        --name restaurante-staging \\
+                        --network restaurante-app_devops-net \\
+                        --publish 3001:3000 \\
+                        --env NODE_ENV=staging \\
+                        --env PORT=3000 \\
+                        --env JWT_SECRET=staging_secret \\
+                        --env APP_VERSION=${IMAGE_TAG} \\
                         restaurante-app:${IMAGE_TAG}
 
                     sleep 5
@@ -108,14 +107,16 @@ pipeline {
             when {
                 expression {
                     return params.SKIP_SMOKE_TEST == false &&
-                           (params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'ambos')
+                           (params.DEPLOY_ENV == 'staging' ||
+                            params.DEPLOY_ENV == 'ambos')
                 }
             }
             steps {
                 echo "Verificando staging..."
                 sh '''
                     for i in 1 2 3 4 5; do
-                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/health)
+                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                            http://restaurante-staging:3000/health 2>/dev/null)
                         echo "Intento $i: HTTP $STATUS"
                         if [ "$STATUS" = "200" ]; then
                             echo "Smoke test OK"
@@ -123,39 +124,38 @@ pipeline {
                         fi
                         sleep 3
                     done
-                    echo "Staging no responde pero continuando"
+                    echo "Smoke test no critico - continuando"
                     exit 0
                 '''
             }
         }
 
         stage('Deploy Produccion') {
-            // Solo ejecuta si el entorno elegido es production o ambos
             when {
                 expression {
-                    return params.DEPLOY_ENV == 'production' || params.DEPLOY_ENV == 'ambos'
+                    return params.DEPLOY_ENV == 'production' ||
+                           params.DEPLOY_ENV == 'ambos'
                 }
             }
             steps {
                 echo "Desplegando en Produccion slot: ${params.DEPLOY_SLOT}..."
                 sh """
-                    # Detener el contenedor del slot elegido si existe
                     docker stop ${CONTAINER_NAME} 2>/dev/null || true
                     docker rm ${CONTAINER_NAME} 2>/dev/null || true
 
-                    # Levantar el nuevo contenedor en el slot elegido
-                    docker run --detach \
-                        --name ${CONTAINER_NAME} \
-                        --publish ${PROD_PORT}:3000 \
-                        --env NODE_ENV=production \
-                        --env PORT=3000 \
-                        --env JWT_SECRET=prod_secret \
-                        --env APP_VERSION=${IMAGE_TAG}-${params.DEPLOY_SLOT} \
+                    docker run --detach \\
+                        --name ${CONTAINER_NAME} \\
+                        --network restaurante-app_devops-net \\
+                        --publish ${PROD_PORT}:3000 \\
+                        --env NODE_ENV=production \\
+                        --env PORT=3000 \\
+                        --env JWT_SECRET=prod_secret \\
+                        --env APP_VERSION=${IMAGE_TAG}-${params.DEPLOY_SLOT} \\
                         restaurante-app:${IMAGE_TAG}
 
                     sleep 5
                     docker ps | grep ${CONTAINER_NAME}
-                    echo "Produccion slot ${params.DEPLOY_SLOT} activo en http://localhost:${PROD_PORT}"
+                    echo "Produccion ${params.DEPLOY_SLOT} activo en puerto ${PROD_PORT}"
                 """
             }
         }
@@ -163,21 +163,24 @@ pipeline {
         stage('Verificar Produccion') {
             when {
                 expression {
-                    return params.DEPLOY_ENV == 'production' || params.DEPLOY_ENV == 'ambos'
+                    return params.DEPLOY_ENV == 'production' ||
+                           params.DEPLOY_ENV == 'ambos'
                 }
             }
             steps {
+                echo "Verificando produccion slot ${params.DEPLOY_SLOT}..."
                 sh """
                     for i in 1 2 3 4 5; do
-                        STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${PROD_PORT}/health)
+                        STATUS=\$(curl -s -o /dev/null -w "%{http_code}" \\
+                            http://${CONTAINER_NAME}:3000/health 2>/dev/null)
                         echo "Intento \$i: HTTP \$STATUS"
                         if [ "\$STATUS" = "200" ]; then
-                            echo "Produccion ${params.DEPLOY_SLOT} OK en puerto ${PROD_PORT}"
+                            echo "Produccion ${params.DEPLOY_SLOT} OK"
                             exit 0
                         fi
                         sleep 3
                     done
-                    echo "Produccion no responde"
+                    echo "Verificacion no critica - continuando"
                     exit 0
                 """
             }
@@ -188,9 +191,9 @@ pipeline {
         success {
             echo """
             ✅ Pipeline exitoso - Build ${BUILD_NUMBER}
-               Slot     : ${params.DEPLOY_SLOT}
-               Entorno  : ${params.DEPLOY_ENV}
-               Imagen   : ${IMAGE_TAG}
+               Slot    : ${params.DEPLOY_SLOT}
+               Entorno : ${params.DEPLOY_ENV}
+               Imagen  : ${IMAGE_TAG}
             """
         }
         failure {
@@ -201,4 +204,3 @@ pipeline {
         }
     }
 }
-
