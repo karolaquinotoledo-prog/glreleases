@@ -138,7 +138,10 @@ services:
 
   # ── JENKINS (CI Server) ─────────────────────────────────────────────
   jenkins:
-    image: jenkins/jenkins:lts-jdk17
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    image: jenkins-custom:latest
     container_name: jenkins-ci
     user: root
     environment:
