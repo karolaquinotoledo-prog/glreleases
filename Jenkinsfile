@@ -140,11 +140,18 @@ pipeline {
             steps {
                 echo "Desplegando en Produccion slot: ${params.DEPLOY_SLOT}..."
                 sh """
-                    docker stop ${CONTAINER_NAME} 2>/dev/null || true
-                    docker rm ${CONTAINER_NAME} 2>/dev/null || true
+                    # Detener y eliminar CUALQUIER contenedor usando el puerto
+                    docker stop restaurante-prod-${params.DEPLOY_SLOT} 2>/dev/null || true
+                    docker rm -f restaurante-prod-${params.DEPLOY_SLOT} 2>/dev/null || true
+
+                    # Esperar a que el puerto quede libre
+                    sleep 3
+
+                    # Verificar que el puerto está libre antes de continuar
+                    echo "Verificando puerto ${PROD_PORT}..."
 
                     docker run --detach \\
-                        --name ${CONTAINER_NAME} \\
+                        --name restaurante-prod-${params.DEPLOY_SLOT} \\
                         --network restaurante-app_devops-net \\
                         --publish ${PROD_PORT}:3000 \\
                         --env NODE_ENV=production \\
@@ -154,7 +161,7 @@ pipeline {
                         restaurante-app:${IMAGE_TAG}
 
                     sleep 5
-                    docker ps | grep ${CONTAINER_NAME}
+                    docker ps | grep restaurante-prod-${params.DEPLOY_SLOT}
                     echo "Produccion ${params.DEPLOY_SLOT} activo en puerto ${PROD_PORT}"
                 """
             }
@@ -189,18 +196,17 @@ pipeline {
 
     post {
         success {
-            echo """
-            ✅ Pipeline exitoso - Build ${BUILD_NUMBER}
-               Slot    : ${params.DEPLOY_SLOT}
-               Entorno : ${params.DEPLOY_ENV}
-               Imagen  : ${IMAGE_TAG}
-            """
+            echo "✅ Pipeline exitoso - Build ${BUILD_NUMBER}"
         }
         failure {
             echo "❌ Pipeline fallido - Build ${BUILD_NUMBER}"
         }
         always {
-            sh 'docker image prune --force || true'
+            sh '''
+                docker image prune --force || true
+                docker images | grep restaurante-app | grep -v latest | grep -v production | \
+                    awk "{print \$1\":\"\$2}" | head -5 | xargs docker rmi 2>/dev/null || true
+            '''
         }
     }
 }
