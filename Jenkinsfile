@@ -23,7 +23,7 @@ pipeline {
     environment {
         APP_NAME       = "restaurante-app"
         IMAGE_TAG      = "build-${BUILD_NUMBER}"
-        PROD_PORT      = "${params.DEPLOY_SLOT == 'blue' ? '3000' : '3002'}"
+        PROD_PORT      = "${params.DEPLOY_SLOT == 'blue' ? '3005' : '3002'}"
         CONTAINER_NAME = "restaurante-prod-${params.DEPLOY_SLOT}"
     }
 
@@ -204,8 +204,9 @@ pipeline {
         always {
             sh '''
                 docker image prune --force || true
+                # Usamos \$1 para que Jenkins no crea que es una variable de Groovy
                 docker images | grep restaurante-app | grep -v latest | grep -v production | \
-                    awk "{print \$1\":\"\$2}" | head -5 | xargs docker rmi 2>/dev/null || true
+                    awk '{print $1":"$2}' | head -n 5 | xargs docker rmi 2>/dev/null || true
             '''
         }
     }
