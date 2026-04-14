@@ -6,6 +6,15 @@ const promClient = require('prom-client');
 const app = express();
 app.use(express.json());
 
+// ── CORS ────────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
 // ── Prometheus metrics ──────────────────────────────────────────────
 const register = new promClient.Registry();
 promClient.collectDefaultMetrics({ register });
@@ -25,7 +34,7 @@ const httpRequestsTotal = new promClient.Counter({
   registers: [register],
 });
 
-// Middleware de métricas
+// ── Middleware de métricas ──────────────────────────────────────────
 app.use((req, res, next) => {
   const end = httpRequestDuration.startTimer();
   res.on('finish', () => {
@@ -35,21 +44,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Datos en memoria (simulación de BD) ────────────────────────────
+// ── Datos en memoria ────────────────────────────────────────────────
 const users = [
   { id: 1, username: 'admin', password: bcrypt.hashSync('admin123', 8), role: 'admin' },
 ];
 
 const products = [
-  { id: 1, name: 'Lomo Saltado', price: 28.50, category: 'Platos de fondo', available: true },
-  { id: 2, name: 'Ceviche Clásico', price: 32.00, category: 'Entradas', available: true },
-  { id: 3, name: 'Inca Kola 500ml', price: 5.00, category: 'Bebidas', available: true },
+  { id: 1, name: 'Lomo Saltado',   price: 28.50, category: 'Platos de fondo', available: true },
+  { id: 2, name: 'Ceviche Clásico', price: 32.00, category: 'Entradas',        available: true },
+  { id: 3, name: 'Inca Kola 500ml', price: 5.00,  category: 'Bebidas',         available: true },
 ];
 
-const SECRET = process.env.JWT_SECRET || 'secret_devops_demo';
-const ENV    = process.env.NODE_ENV   || 'development';
-const PORT   = process.env.PORT       || 3000;
-const VERSION = process.env.APP_VERSION || '1.0.0';
+const SECRET  = process.env.JWT_SECRET    || 'secret_devops_demo';
+const ENV     = process.env.NODE_ENV      || 'development';
+const PORT    = process.env.PORT          || 3000;
+const VERSION = process.env.APP_VERSION   || '1.0.0';
 
 // ── Auth middleware ─────────────────────────────────────────────────
 function auth(req, res, next) {
@@ -78,7 +87,11 @@ app.post('/auth/login', async (req, res) => {
   const user = users.find(u => u.username === username);
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ error: 'Credenciales inválidas' });
-  const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET, { expiresIn: '8h' });
+  const token = jwt.sign(
+    { id: user.id, username: user.username, role: user.role },
+    SECRET,
+    { expiresIn: '8h' }
+  );
   res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
 });
 
