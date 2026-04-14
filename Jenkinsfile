@@ -140,18 +140,11 @@ pipeline {
             steps {
                 echo "Desplegando en Produccion slot: ${params.DEPLOY_SLOT}..."
                 sh """
-                    # Detener y eliminar CUALQUIER contenedor usando el puerto
-                    docker stop restaurante-prod-${params.DEPLOY_SLOT} 2>/dev/null || true
-                    docker rm -f restaurante-prod-${params.DEPLOY_SLOT} 2>/dev/null || true
-
-                    # Esperar a que el puerto quede libre
-                    sleep 3
-
-                    # Verificar que el puerto está libre antes de continuar
-                    echo "Verificando puerto ${PROD_PORT}..."
+                    docker stop ${CONTAINER_NAME} 2>/dev/null || true
+                    docker rm ${CONTAINER_NAME} 2>/dev/null || true
 
                     docker run --detach \\
-                        --name restaurante-prod-${params.DEPLOY_SLOT} \\
+                        --name ${CONTAINER_NAME} \\
                         --network restaurante-app_devops-net \\
                         --publish ${PROD_PORT}:3000 \\
                         --env NODE_ENV=production \\
@@ -161,7 +154,7 @@ pipeline {
                         restaurante-app:${IMAGE_TAG}
 
                     sleep 5
-                    docker ps | grep restaurante-prod-${params.DEPLOY_SLOT}
+                    docker ps | grep ${CONTAINER_NAME}
                     echo "Produccion ${params.DEPLOY_SLOT} activo en puerto ${PROD_PORT}"
                 """
             }
