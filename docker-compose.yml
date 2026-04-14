@@ -93,7 +93,7 @@ services:
       JWT_SECRET: prod_secret_CHANGE_ME_IN_REAL_ENV
       APP_VERSION: "${APP_VERSION:-1.0.0}"
     ports:
-      - "3000:3000"
+      - "3005:3000"
     networks:
       - devops-net
     healthcheck:
