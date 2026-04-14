@@ -6,6 +6,8 @@
 # CI/CD:     Jenkins (8080)
 ##############################################################
 
+version: "3.9"
+
 networks:
   devops-net:
     driver: bridge
@@ -21,19 +23,6 @@ volumes:
 
 # ── Servicios de aplicación ──────────────────────────────────────────
 services:
-  # ── FRONTEND ────────────────────────────────────────────────
-  frontend:
-    image: nginx:1.25-alpine
-    container_name: restaurante-frontend
-    volumes:
-      - ./frontend:/usr/share/nginx/html:ro
-    ports:
-      - "8888:80"
-    networks:
-      - devops-net
-    depends_on:
-      - app-staging
-    restart: unless-stopped
 
   mysql-db:  # <--- Este es el nombre del servicio
     image: mysql:8.0
@@ -93,7 +82,7 @@ services:
       JWT_SECRET: prod_secret_CHANGE_ME_IN_REAL_ENV
       APP_VERSION: "${APP_VERSION:-1.0.0}"
     ports:
-      - "3005:3000"
+      - "3000:3000"
     networks:
       - devops-net
     healthcheck:
